@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Discord Long Text Splitter</title>
+    <!-- Carregando Tailwind CSS para o visual -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Fonte monoespaçada inspirada no Liberation Mono do script original */
+        body {
+            background-color: #1e1e2e;
+            color: #cdd6f4;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        }
+        
+        /* Scrollbar customizada para combinar com o tema escuro */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #181825; 
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #45475a; 
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #585b70; 
+        }
+    </style>
+</head>
+<body class="min-h-screen p-4 sm:p-8">
+
+    <div class="max-w-6xl mx-auto space-y-6">
+        
+        <!-- Header -->
+        <header class="text-center sm:text-left">
+            <h1 class="text-3xl font-bold text-[#89b4fa] mb-2">Separador de grande textos Discord</h1>
+            <p class="text-[#a6adc8] text-sm">Divide textos longos em blocos de &lt;= 2000 caracteres</p>
+        </header>
+
+        <!-- Input Area -->
+        <div class="space-y-2">
+            <label for="inputText" class="block text-sm font-medium text-[#bac2de]">Cole seu texto aqui</label>
+            <textarea id="inputText" class="w-full h-48 p-4 bg-[#11111b] border border-[#313244] rounded-lg focus:ring-2 focus:ring-[#89b4fa] focus:border-transparent outline-none resize-y text-sm" placeholder="Texto grande..."></textarea>
+            
+            <button id="splitBtn" class="w-full sm:w-auto px-6 py-3 bg-[#89b4fa] hover:bg-[#74c7ec] text-[#11111b] font-bold rounded-lg transition-colors duration-200">
+                Split Text
+            </button>
+        </div>
+
+        <div class="border-t border-[#313244] my-6"></div>
+
+        <!-- Info Labels -->
+        <div class="flex flex-col sm:flex-row justify-between text-sm bg-[#181825] p-4 rounded-lg border border-[#313244]">
+            <span id="textLengthLabel">Tamanho do texto: ----- caracter(es)</span>
+            <span id="numberOfChunksLabel">Numero de blocos: --</span>
+        </div>
+
+        <div class="border-t border-[#313244] my-6"></div>
+
+        <!-- Output / Copy Chunks -->
+        <div>
+            <h2 class="text-lg font-semibold mb-4 text-[#89b4fa]">Copiar blocos para área de transferência:</h2>
+            <div id="chunksContainer" class="space-y-3">
+                <div class="text-[#a6adc8] italic p-4 bg-[#11111b] rounded-lg text-center border border-[#313244] border-dashed">
+                    [Nada pra copiar ainda]
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        // --- Constants ---
+        const messageMaxLength = 2000;
+        const newlineSeparator = "\n";
+        const previewLength = 50;
+
+        // --- State ---
+        let splittedText = [];
+        let copyChunkButtonCounters = [];
+
+        // --- Text Splitting Logic (Converted from Python) ---
+
+        function rightTrim(text, toBeTrimmed) {
+            while (text.endsWith(toBeTrimmed) && text.length > 0) {
+                text = text.slice(0, -toBeTrimmed.length);
+            }
+            return text;
+        }
+
+        function splittingIndex(text, maxLength, newline) {
+            if (text.length <= maxLength) {
+                return text.length;
+            }
+            
+            let remainingText = text.slice(0, maxLength + 2 * newline.length);
+            
+            while (true) {
+                let possibleIndex = remainingText.lastIndexOf(newline);
+                
+                // Fallback de segurança web: se não houver nenhuma quebra de linha na string,
+                // forçamos o corte direto no limite de caracteres para não criar loop infinito.
+                if (possibleIndex === -1) {
+                    return maxLength;
+                }
+                
+                remainingText = remainingText.slice(0, possibleIndex);
+                
+                if (remainingText.endsWith(newline)) {
+                    remainingText = rightTrim(remainingText, newline);
+                } else if (possibleIndex <= maxLength) {
+                    return possibleIndex;
+                }
+            }
+        }
+
+        function split(text, maxLength, newline) {
+            let resultChunks = [];
+            while (text !== "") {
+                let currentSplittingIndex = splittingIndex(text, maxLength, newline);
+                resultChunks.push(text.slice(0, currentSplittingIndex));
+                
+                // Para não pular uma letra no caso de fallback (onde o corte não foi num \n)
+                let textToSkip = text.substring(currentSplittingIndex, currentSplittingIndex + newline.length);
+                if (textToSkip === newline) {
+                    text = text.slice(currentSplittingIndex + newline.length);
+                } else {
+                    text = text.slice(currentSplittingIndex);
+                }
+            }
+            return resultChunks;
+        }
+
+        // --- UI & Interaction Logic ---
+
+        function createPreview(text) {
+            let flattenedText = text.replace(/\n/g, " | ").replace(/\t/g, "  ");
+            let result = "“" + flattenedText.substring(0, previewLength);
+            if (flattenedText.length > previewLength) {
+                result += "…";
+            }
+            result += "”";
+            
+            // Lógica padEnd para se aproximar do ljust(previewLength+3)
+            return result.padEnd(previewLength + 3, ' ');
+        }
+
+        function formatCopyChunkText(chunkIndex) {
+            const indexStr = String(chunkIndex).padStart(2, '0');
+            const lengthStr = String(splittedText[chunkIndex].length).padStart(4, '0');
+            const previewStr = createPreview(splittedText[chunkIndex]);
+            const counterStr = String(copyChunkButtonCounters[chunkIndex]).padStart(2, '0');
+            
+            return `#${indexStr}   —   Length: ${lengthStr}   —   Preview: ${previewStr}   —   Copied: ${counterStr} time·s`;
+        }
+
+        function copyToClipboard(text, chunkIndex) {
+            // Usa execCommand como método primário por ser mais confiável em iFrames/Previews
+            const textarea = document.createElement('textarea');
+            textarea.value = text;
+            textarea.style.position = 'fixed'; // Evita scroll na tela
+            document.body.appendChild(textarea);
+            textarea.select();
+            
+            try {
+                document.execCommand('copy');
+            } catch (err) {
+                console.error('Falha ao copiar', err);
+            } finally {
+                document.body.removeChild(textarea);
+            }
+
+            // Atualiza o contador e a UI
+            copyChunkButtonCounters[chunkIndex]++;
+            updateChunkButtonUI(chunkIndex);
+        }
+
+        function updateChunkButtonUI(chunkIndex) {
+            const btn = document.getElementById(`chunk-btn-${chunkIndex}`);
+            if (btn) {
+                btn.textContent = formatCopyChunkText(chunkIndex);
+                // Efeito visual de clique
+                btn.classList.add('bg-[#a6e3a1]', 'text-[#11111b]');
+                setTimeout(() => {
+                    btn.classList.remove('bg-[#a6e3a1]', 'text-[#11111b]');
+                }, 150);
+            }
+        }
+
+        function renderChunks() {
+            const container = document.getElementById('chunksContainer');
+            container.innerHTML = ''; // Limpa a lista
+            
+            if (splittedText.length === 0) {
+                container.innerHTML = `<div class="text-[#a6adc8] italic p-4 bg-[#11111b] rounded-lg text-center border border-[#313244] border-dashed">[Nada para copiar...]</div>`;
+                return;
+            }
+
+            splittedText.forEach((chunk, index) => {
+                const btn = document.createElement('button');
+                btn.id = `chunk-btn-${index}`;
+                btn.className = "w-full text-left p-3 mb-2 bg-[#181825] hover:bg-[#313244] border border-[#313244] rounded-lg cursor-pointer transition-colors duration-150 whitespace-pre overflow-x-auto text-sm";
+                btn.textContent = formatCopyChunkText(index);
+                
+                btn.addEventListener('click', () => {
+                    copyToClipboard(chunk, index);
+                });
+                
+                container.appendChild(btn);
+            });
+        }
+
+        // --- Event Listeners ---
+
+        document.getElementById('splitBtn').addEventListener('click', () => {
+            const textInput = document.getElementById('inputText').value;
+            
+            if (!textInput) {
+                return;
+            }
+
+            // Reseta e divide
+            splittedText = split(textInput, messageMaxLength, newlineSeparator);
+            copyChunkButtonCounters = new Array(splittedText.length).fill(0);
+            
+            // Atualiza Labels
+            document.getElementById('textLengthLabel').textContent = `Comprimento do texto: ${String(textInput.length).padStart(5, '0')} caracter(es)`;
+            document.getElementById('numberOfChunksLabel').textContent = `Número de blocos: ${String(splittedText.length).padStart(2, '0')}`;
+            
+            // Renderiza Botões
+            renderChunks();
+        });
+
+    </script>
+</body>
+</html>
